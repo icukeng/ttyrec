@@ -95,11 +95,13 @@ void doshell(const char*);
 
 char	*shell;
 FILE	*fscript;
+FILE	*fslog;
 int	master;
 int	slave;
 int	child;
 int	subchild;
 char	*fname;
+char	*flog;
 
 struct	termios tt;
 struct	winsize win;
@@ -146,7 +148,7 @@ main(argc, argv)
 		case 'h':
 		case '?':
 		default:
-			fprintf(stderr, _("usage: ttyrec [-u] [-e command] [-a] [file]\n"));
+			fprintf(stderr, _("usage: ttyrec [-u] [-e command] [-a] [file] [log]\n"));
 			exit(1);
 		}
 	argc -= optind;
@@ -161,6 +163,16 @@ main(argc, argv)
 		fail();
 	}
 	setbuf(fscript, NULL);
+
+	if (argc > 1)
+		flog = argv[1];
+	else
+		flog = "ttylog";
+	if ((fslog = fopen(flog, aflg ? "a" : "w")) == NULL) {
+		perror(flog);
+		fail();
+	}
+	setbuf(fslog, NULL);
 
 	shell = getenv("SHELL");
 	if (shell == NULL)
@@ -204,13 +216,19 @@ doinput()
 {
 	register int cc;
 	char ibuf[BUFSIZ];
+	char nlbuf = 0x0a;
 
 	(void) fclose(fscript);
 #ifdef HAVE_openpty
 	(void) close(slave);
 #endif
-	while ((cc = read(0, ibuf, BUFSIZ)) > 0)
+	while ((cc = read(0, ibuf, BUFSIZ)) > 0) {
 		(void) write(master, ibuf, cc);
+		if(cc == 1 && ibuf[0] == 0x0d) // readable newline 
+			(void) fwrite(&nlbuf, 1, 1, fslog);
+		else
+			(void) fwrite(ibuf, 1, cc, fslog);
+	}
 	done();
 }
 
@@ -313,6 +331,7 @@ dooutput()
 
 	setbuf(stdout, NULL);
 	(void) close(0);
+	(void) fclose(fslog);
 #ifdef HAVE_openpty
 	(void) close(slave);
 #endif
@@ -350,6 +369,7 @@ doshell(const char* command)
 	getslave();
 	(void) close(master);
 	(void) fclose(fscript);
+	(void) fclose(fslog);
 	(void) dup2(slave, 0);
 	(void) dup2(slave, 1);
 	(void) dup2(slave, 2);
